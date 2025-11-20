@@ -1,5 +1,7 @@
+# Shove all the imports in here rather than in the notebook to save space. Namespace completely imported over
+
 import codecs
-import pauliarray as pa
+# import pauliarray as pa
 import numpy as np
 import rustworkx as rx
 from rustworkx.visualization import graphviz_draw
@@ -15,13 +17,22 @@ from scipy.special import j0
 import numpy as np
 
 
+# ======================================================================
+# NOTE: Generating hamiltonians using Pauliarray operator types
 
-def generate_dipole_hamiltonian(n, neighbor_list=None):
+def generate_dipole_hamiltonian(n:int, neighbor_list=None):
     
-    """ Creates an operator object that behaves as the dipole Hamiltonian"""
+    """ Creates an operator object that behaves as the dipole Hamiltonian
+
+    n: number of qubits
+    neighbour_list: list of tuples indicating the interactions between the qubits
+    
+    """
 
     edges = neighbor_list if neighbor_list is not None else [(k,(k+1)% n) for k in range(n)]
     # Unless we intentionally create a "neighbour_list" (for the edges), it will default to creating the nearest neighbour in a ring interaction as before 
+    # Default neighbour_list behaviour: if n==11 (no of qubits), then edges would be a list of tuples from [(0,1), (1,2), ... (10,0)] since the last element is up to but not including.
+    # In each tuple, the number inside is the qubit that that operator will act on. For example, (0,1) means that Qubit0 and Qubit1 will have "True" for the Z or X string.
 
     ising_z = np.zeros((len(edges), n), dtype=bool)
     ising_x = np.zeros((len(edges), n), dtype=bool)
@@ -46,7 +57,6 @@ def generate_dipole_hamiltonian(n, neighbor_list=None):
     return ising_hamiltonian.__add__(ff1_hamiltonian).__add__(ff2_hamiltonian)
 
 
-
 def generate_dq_hamiltonian(n, neighbor_list=None):
     
     """Creates an operator object that behaves as the double quantum (DQ) hamiltonian"""
@@ -69,7 +79,8 @@ def generate_dq_hamiltonian(n, neighbor_list=None):
     dq2_hamiltonian = op.Operator.from_paulis_and_weights(pa.PauliArray(dq2_z, dq2_x), -1)
     return dq1_hamiltonian.__add__(dq2_hamiltonian)
 
-
+# ================================================================================
+# NOTE: Liouvillian graph!
 
 def generate_louivillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=None, directed=True, decay_factor=1.0):
     """
@@ -103,14 +114,14 @@ def generate_louivillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=
 
     for _layer in range(depth):     # the number of times to perform the commutator
 
-        print("\033[31m=======================\033[0m")
-        print(f"\033[31mLayer: {_layer}\n\033[0m")
+        # print("\033[31m=======================\033[0m")
+        # print(f"\033[31mLayer: {_layer}\n\033[0m")
         
         next_layer = []
         
         for node_idx in current_layer:
             label = g.get_node_data(node_idx) 
-            print(f"label: {label}\n")
+            # print(f"label: {label}\n")
             
             # build operator from the label and commute
             pauli_arr = pa.PauliArray.from_labels(label)
@@ -119,7 +130,7 @@ def generate_louivillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=
             # The Liouvillian operation: commutation of the hamiltonian with the previous node to create new nodes
             o_next = op.commutator(ham, node_op)
             o_next.combine_repeated_terms(True) 
-            print(f"o_next: {o_next.inspect()}\n")
+            # print(f"o_next: {o_next.inspect()}\n")
 
             for p, w in zip(o_next.paulis, o_next.weights):
 
@@ -162,7 +173,6 @@ def generate_louivillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=
     return g, label_to_idx
 
 
-
 def node_attr(node):
     s = str(node)
 
@@ -189,45 +199,12 @@ def node_attr(node):
     #return {"label": " ".join(parts) if parts else s}
     
 
-
 def edge_attr(edge):
     w = edge
     return {"label": f"{np.real(w):.2f}"}
 
-
-
-def exp_action_via_eig(mat, vec, t):        
-    """
-    Compute exp(mat * t) @ vec using eigendecomposition with a scipy fallback for ill-conditioned matrices.     
-
-    mat: (n,n) ndarray
-    vec: (n,) ndarray
-    t: scalar
-    """
-
-    mat = np.asarray(mat)
-    vec = np.asarray(vec)
-    assert mat.shape[0] == mat.shape[1] == vec.shape[0]     # Assert that the matrix shape must be square (rows = columns) and the vector's dimension is compatible with the matrix
-    
-    vals, vecs = np.linalg.eig(mat)     # eigenvalues and eigenvectors of the matrix we've inputted
-    
-    # if eigenvector matrix is ill-conditioned (large condition number), fallback to scipy.linalg.expm if available. Large condition number = sensitive to small change in input 
-    if np.linalg.cond(vecs) > 1e12:         
-        try:
-            M = expm(mat * t)
-            res = M.dot(vec)
-            return np.real_if_close(res)
-        except Exception:
-            raise RuntimeError("Matrix appears nearly defective; install scipy or use a numerical integrator.")
-    
-    expD = np.diag(np.exp(vals * t))        # This is equivalent to the result of exponentiating the diagonal matrix of mat's eigenvalues (multiplied by some scalar t)
-
-    M = vecs.dot(expD).dot(np.linalg.inv(vecs))     
-    # Basically if M = PDP^-1 , then exp(Mt) = P exp(Dt) P^-1. Maths!
-
-    return np.real_if_close(M.dot(vec))         # vec != vecs, don't confuse. 
-
-
+# ================================================================================
+# NOTE: Time evolutions of operators
 
 def solve_chain_time_series(chain_mat, A0, times, max_step=.01):
     """
@@ -251,6 +228,11 @@ def solve_chain_time_series(chain_mat, A0, times, max_step=.01):
 
     return sol.y.T      # transpose of sol.y
 
+
+
+
+
+# ================================================================================
 
 
 def pauli_to_mqc(p_string, basis="Z"):
@@ -280,32 +262,6 @@ def pauli_to_mqc(p_string, basis="Z"):
 
 
 
-def compute_time_evolution(graph, A0, times, weight_fn=lambda x: x, max_step=0.01):
-    """
-    Compute the time evolution of a system represented by a Liouvillian graph.
-
-    Parameters:
-    - graph: rustworkx.PyDiGraph or rustworkx.PyGraph
-        The Liouvillian graph representing the system.
-    - A0: numpy.ndarray
-        The initial state vector.
-    - times: numpy.ndarray
-        Array of time points for the evolution.
-    - weight_fn: callable, optional
-        A function to extract weights from graph edges. Defaults to identity.
-    - max_step: float, optional
-        Maximum step size for the numerical integrator.
-
-    Returns:
-    - A_t: numpy.ndarray
-        The time-evolved state vector at each time point.
-    """
-    # Generate the adjacency matrix using rustworkx
-    chain_mat = rx.adjacency_matrix(graph, weight_fn=weight_fn).T
-
-    # Solve the time evolution using the solve_chain_time_series function
-    A_t = solve_chain_time_series(chain_mat, A0, times, max_step=max_step)
-    return A_t
 
 
 
@@ -375,3 +331,68 @@ def plot_mqc_from_label_map(label_map, A_t, times=None):
 # Define the Bessel function model
 def bessel_model(t, amplitude, frequency, phase):
     return amplitude * j0(2 * np.pi * frequency * t + phase)
+
+
+# ====================================================================================================
+# ====================================================================================================
+# NOTE: Unused functions
+
+def exp_action_via_eig(mat, vec, t):        
+    """
+    Compute exp(mat * t) @ vec using eigendecomposition with a scipy fallback for ill-conditioned matrices.     
+
+    mat: (n,n) ndarray
+    vec: (n,) ndarray
+    t: scalar
+    """
+
+    mat = np.asarray(mat)
+    vec = np.asarray(vec)
+    assert mat.shape[0] == mat.shape[1] == vec.shape[0]     # Assert that the matrix shape must be square (rows = columns) and the vector's dimension is compatible with the matrix
+    
+    vals, vecs = np.linalg.eig(mat)     # eigenvalues and eigenvectors of the matrix we've inputted
+    
+    # if eigenvector matrix is ill-conditioned (large condition number), fallback to scipy.linalg.expm if available. Large condition number = sensitive to small change in input 
+    if np.linalg.cond(vecs) > 1e12:         
+        try:
+            M = expm(mat * t)
+            res = M.dot(vec)
+            return np.real_if_close(res)
+        except Exception:
+            raise RuntimeError("Matrix appears nearly defective; install scipy or use a numerical integrator.")
+    
+    expD = np.diag(np.exp(vals * t))        # This is equivalent to the result of exponentiating the diagonal matrix of mat's eigenvalues (multiplied by some scalar t)
+
+    M = vecs.dot(expD).dot(np.linalg.inv(vecs))     
+    # Basically if M = PDP^-1 , then exp(Mt) = P exp(Dt) P^-1. Maths!
+
+    return np.real_if_close(M.dot(vec))         # vec != vecs, don't confuse. 
+
+# NOTE: Decided not to use this function altogether for now since it just makes the previous part weird. It's easy enough to understand without making a function for it!
+
+def compute_time_evolution(graph, A0, times, weight_fn=lambda x: x, max_step=0.01):
+    """
+    Compute the time evolution of a system represented by a Liouvillian graph.
+
+    Parameters:
+    - graph: rustworkx.PyDiGraph or rustworkx.PyGraph
+        The Liouvillian graph representing the system.
+    - A0: numpy.ndarray
+        The initial state vector.
+    - times: numpy.ndarray
+        Array of time points for the evolution.
+    - weight_fn: callable, optional
+        A function to extract weights from graph edges. Defaults to identity.
+    - max_step: float, optional
+        Maximum step size for the numerical integrator.
+
+    Returns:
+    - A_t: numpy.ndarray
+        The time-evolved state vector at each time point.
+    """
+    # Generate the adjacency matrix using rustworkx
+    chain_mat = rx.adjacency_matrix(graph, weight_fn=weight_fn).T
+
+    # Solve the time evolution using the solve_chain_time_series function
+    A_t = solve_chain_time_series(chain_mat, A0, times, max_step=max_step)
+    return A_t
