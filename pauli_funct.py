@@ -1,20 +1,19 @@
 # Shove all the imports in here rather than in the notebook to save space. Namespace completely imported over
+# NOTE: Unused functions all at the bottom of this script
 
 import codecs
-# import pauliarray as pa
 import numpy as np
 import rustworkx as rx
 from rustworkx.visualization import graphviz_draw
 import matplotlib.pyplot as plt
 import pauliarray.pauli.operator as op
 import pauliarray.pauli.pauli_array as pa
-from scipy.linalg import expm
+from scipy.linalg import expm # Only relevant for one of the unused functions placed at the bottom
 from scipy.integrate import solve_ivp
 from scipy.special import comb
 from scipy.special import j0
 from scipy.optimize import curve_fit
-from scipy.special import j0
-import numpy as np
+import sympy
 
 
 # ======================================================================
@@ -24,8 +23,9 @@ def generate_dipole_hamiltonian(n:int, neighbor_list=None):
     
     """ Creates an operator object that behaves as the dipole Hamiltonian
 
-    n: number of qubits
-    neighbour_list: list of tuples indicating the interactions between the qubits
+    Parameters
+    - n: number of qubits
+    - neighbour_list: list of tuples indicating the interactions between the qubits
     
     """
 
@@ -59,7 +59,13 @@ def generate_dipole_hamiltonian(n:int, neighbor_list=None):
 
 def generate_dq_hamiltonian(n, neighbor_list=None):
     
-    """Creates an operator object that behaves as the double quantum (DQ) hamiltonian"""
+    """Creates an operator object that behaves as the double quantum (DQ) hamiltonian
+    
+    Parameters
+    - n: number of qubits
+    - neighbour_list: list of tuples indicating the interactions between the qubits
+    
+    """
 
     edges = neighbor_list if neighbor_list is not None else [(k,(k+1)% n) for k in range(n)]
 
@@ -187,13 +193,16 @@ def node_attr(node):
         
 
     count = len(parts)
+
     if count == 0:
         return {"label": s}
+    
     # base blue intensity for one non-'I' char, reduce for each additional char
     base = 255
     decrement = 50
     blue = max(30, base - (count - 1) * decrement)
     hex_color = f"#{0:02x}{0:02x}{blue:02x}"
+
     # return early so the final return isn't reached
     return {"label": " ".join(parts), "color": "blue" if count == 1 else "red", "fillcolor": "blue" if count == 1 else "red", "style": "filled", "fontcolor": "white", "shape": "ellipse", "fontsize": "9", "width": "0.7", "height": "0.7", "fixedsize": "true"}
     #return {"label": " ".join(parts) if parts else s}
@@ -210,10 +219,13 @@ def solve_chain_time_series(chain_mat, A0, times, max_step=.01):
     """
     Compute A(t) = exp(chain_mat * t) @ A0 for an array of times.
     
-    chain_mat: (n,n) ndarray
-    A0: (n,) ndarray initial condition
-    times: 1D array-like of times
-    Returns: (len(times), n) ndarray
+    Parameters:
+    - chain_mat: (n,n) ndarray
+    - A0: (n,) ndarray initial condition
+    - times: 1D array-like of times
+    
+    Returns: 
+    - (len(times), n) ndarray
     """
     times = np.asarray(times)
     A0 = np.asarray(A0)
@@ -229,39 +241,61 @@ def solve_chain_time_series(chain_mat, A0, times, max_step=.01):
     return sol.y.T      # transpose of sol.y
 
 
-
-
-
 # ================================================================================
-
+# Multiple quantum coherences
 
 def pauli_to_mqc(p_string, basis="Z"):
     r"""
-    Take a Pauli string and return a dictionary mapping MQC orders to their coefficients
-    in the given basis. The MQC order of an operators Oq is defined in a basis of the 
-    (collective) operator P = \sum_i \sigma_mu^{(i)} as [P, Oq ] = q Oq. When P is a 
-    Pauli-Z, the MQC order can be computed by counting the number of sigma_+ operators minus
-    the number of sigma_- operators in the Pauli string.
+    Take an operator and return a dictionary of its 'Multiple Quantum Coherence' (MQC) values and coefficients. 
+    For simplicity, we limit our input operators to Pauli strings, since operators are ultimately just sums of Pauli strings
+
+    We need to define a "basis" with which we have our raising and lowering (flipping) operators. 
+    For example, if our basis is Z, then our raising operator sigma_+ = |0><1|, lowering operator sigma_- = |1><0| (raises/lowers the Z eigenvalue)
+    Or, if our basis is X, then our sigma_+ = |+><-|, sigma_- = |-><+| (raises/lowers the X eigenvalue)
+
+    Because we are just counting the number of raising and lowering operators, we should just multiply them out like scalars! 
+    
+    Returns:
+    - Dictionary of {q1: corresponding coefficient, q2: corresponding coefficient, ... etc}
     """
+
     mqc = {}
-    match basis:
-        case "Z":
+
+    match basis:        # "match-case" block is an alternative to "if-elif-else"
+
+        case "Z":           
             num_x = p_string.count('X')
             num_y = p_string.count('Y')
-            n = num_x + num_y
-            for nminus in range(0, 2*n+1, 2):
-                mqc[n-nminus] = (1j)**num_y * np.sum([comb(num_x, k)*comb(num_y, nminus//2-k)*((-1)**(nminus//2 - k) ) for k in range(0, nminus//2+1)])
+            sigmaplus = sympy.symbols("sigmaplus")
+            sigmaminus = sympy.symbols("sigmaminus")
+
+            expression = (sigmaminus + sigmaplus)**num_x * (sigmaminus - sigmaplus)**num_y
+            print(expression.expand())
+            print("==================\n")
+
+            for term in expression.expand().args:
+
+                coefficient, sigmaterms = term.as_coeff_Mul()
+
+                power_dict = sigmaterms.as_powers_dict()
+
+                plusterms = power_dict.get(sigmaplus, 0)
+                minusterms = power_dict.get(sigmaminus, 0)
+                
+                q = plusterms - minusterms
+
+                mqc[q] = int(coefficient)*(1j)**num_y       # throw the imaginary unit back in because we neglected it earlier.
+
         case "X":
             pass  # implement later
+
         case "Y":
             pass  # implement later
+
         case _:
             raise ValueError(f"Unknown basis: {basis}")
         
     return mqc
-
-
-
 
 
 
@@ -276,16 +310,21 @@ def plot_mqc_from_label_map(label_map, A_t, times=None):
 
     Returns:
     - None, displays the MQC plot
+
     """
     # Compute MQC intensities
     mqc_intensity = {}
+
     if times is None:
         times = np.arange(A_t.shape[0])
+
     for label, idx in label_map.items():
         mqc_orders = pauli_to_mqc(label)
+
         for order, coeff in mqc_orders.items():
             if order not in mqc_intensity:
                 mqc_intensity[order] = np.zeros(len(times), dtype=np.complex128)
+
             mqc_intensity[order] += coeff * A_t[:, idx]
 
     # Convert to intensity (magnitude squared)
@@ -327,9 +366,11 @@ def plot_mqc_from_label_map(label_map, A_t, times=None):
     plt.show()
 
 
-
-# Define the Bessel function model
+# Define the Bessel function model... why?
 def bessel_model(t, amplitude, frequency, phase):
+    """
+    Zeroth order Bessel function from j0 function imported from scipy
+    """
     return amplitude * j0(2 * np.pi * frequency * t + phase)
 
 
@@ -368,9 +409,11 @@ def exp_action_via_eig(mat, vec, t):
 
     return np.real_if_close(M.dot(vec))         # vec != vecs, don't confuse. 
 
-# NOTE: Decided not to use this function altogether for now since it just makes the previous part weird. It's easy enough to understand without making a function for it!
+
 
 def compute_time_evolution(graph, A0, times, weight_fn=lambda x: x, max_step=0.01):
+# NOTE: Decided not to use this function altogether for now since it just makes the previous part weird. 
+# It's easy enough to understand without making a function for it!
     """
     Compute the time evolution of a system represented by a Liouvillian graph.
 
