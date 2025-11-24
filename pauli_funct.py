@@ -14,6 +14,9 @@ from scipy.special import comb
 from scipy.special import j0
 from scipy.optimize import curve_fit
 import sympy
+import timeit
+import cProfile, pstats, io
+
 
 
 # ======================================================================
@@ -252,8 +255,6 @@ def pauli_to_mqc(p_string, basis="Z"):
     We need to define a "basis" with which we have our raising and lowering (flipping) operators. 
     For example, if our basis is Z, then our raising operator sigma_+ = |0><1|, lowering operator sigma_- = |1><0| (raises/lowers the Z eigenvalue)
     Or, if our basis is X, then our sigma_+ = |+><-|, sigma_- = |-><+| (raises/lowers the X eigenvalue)
-
-    Because we are just counting the number of raising and lowering operators, we should just multiply them out like scalars! 
     
     Returns:
     - Dictionary of {q1: corresponding coefficient, q2: corresponding coefficient, ... etc}
@@ -266,25 +267,13 @@ def pauli_to_mqc(p_string, basis="Z"):
         case "Z":           
             num_x = p_string.count('X')
             num_y = p_string.count('Y')
-            sigmaplus = sympy.symbols("sigmaplus")
-            sigmaminus = sympy.symbols("sigmaminus")
 
-            expression = (sigmaminus + sigmaplus)**num_x * (sigmaminus - sigmaplus)**num_y
-            print(expression.expand())
-            print("==================\n")
-
-            for term in expression.expand().args:
-
-                coefficient, sigmaterms = term.as_coeff_Mul()
-
-                power_dict = sigmaterms.as_powers_dict()
-
-                plusterms = power_dict.get(sigmaplus, 0)
-                minusterms = power_dict.get(sigmaminus, 0)
-                
-                q = plusterms - minusterms
-
-                mqc[q] = int(coefficient)*(1j)**num_y       # throw the imaginary unit back in because we neglected it earlier.
+            for k in range(0, num_x+1):
+                for g in range(0, num_y+1):
+                    q = int(2*(k+g)-num_y-num_x)        # The MQC order q
+                    mqc[q] = mqc.get(q,0) + int((-1)**g * comb(num_x,k,exact=True) * comb(num_y,g,exact=True))*(1j)**num_y      # Sum up all the corresponding coeffs for q
+            
+            mqc = {mqc_key: mqc_value for mqc_key, mqc_value in mqc.items() if mqc_value != 0}      # Remove any values of 0; has no effect
 
         case "X":
             pass  # implement later
@@ -292,6 +281,34 @@ def pauli_to_mqc(p_string, basis="Z"):
         case "Y":
             pass  # implement later
 
+        case _:
+            raise ValueError(f"Unknown basis: {basis}")
+        
+    return mqc
+
+
+def pauli_to_mqc_andrew(p_string, basis="Z"):
+    r"""
+    Take a Pauli string and return a dictionary mapping MQC orders to their coefficients
+    in the given basis. The MQC order of an operators Oq is defined in a basis of the 
+    (collective) operator P = \sum_i \sigma_mu^{(i)} as [P, Oq ] = q Oq. When P is a 
+    Pauli-Z, the MQC order can be computed by counting the number of sigma_+ operators minus
+    the number of sigma_- operators in the Pauli string.
+    """
+    mqc = {}
+    match basis:
+        case "Z":
+            num_x = p_string.count('X')
+            num_y = p_string.count('Y')
+
+            n = num_x + num_y
+
+            for nminus in range(0, 2*n+1, 2):
+                mqc[n-nminus] = (1j)**num_y * np.sum([comb(num_x, k)*comb(num_y, nminus//2-k)*((-1)**(nminus//2 - k) ) for k in range(0, nminus//2+1)])
+        case "X":
+            pass  # implement later
+        case "Y":
+            pass  # implement later
         case _:
             raise ValueError(f"Unknown basis: {basis}")
         
