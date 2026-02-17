@@ -1,4 +1,6 @@
 import codecs
+from collections import defaultdict
+from itertools import product
 import pauliarray as pa
 import numpy as np
 import rustworkx as rx
@@ -13,6 +15,7 @@ from scipy.special import j0
 from scipy.optimize import curve_fit
 from scipy.special import j0
 import numpy as np
+
 
 
 
@@ -47,6 +50,57 @@ def generate_dipole_hamiltonian(n, neighbor_list=None):
 
 
 
+def generate_xxz_hamiltonian(n, neighbor_list=None, delta=-2, h=0, J=1/2):
+    
+    """
+    Creates an operator object for the XXZ Hamiltonian with a field:
+    H = -J Σ (XX + YY + Δ ZZ) - 2h Σ Z
+    Defaults Δ, h, & J to dipole hamiltonian
+    """
+
+    edges = neighbor_list if neighbor_list is not None else [(k, (k + 1) % n) for k in range(n)]
+    # Unless we intentionally create a "neighbour_list" (for the edges), it will default to creating the nearest neighbour in a ring interaction as before 
+
+
+    # Two-body Pauli masks
+    ising_z = np.zeros((len(edges), n), dtype=bool)
+    ising_x = np.zeros((len(edges), n), dtype=bool)
+    ff1_z = np.zeros((len(edges), n), dtype=bool)
+    ff1_x = np.zeros((len(edges), n), dtype=bool)
+    ff2_z = np.zeros((len(edges), n), dtype=bool)
+    ff2_x = np.zeros((len(edges), n), dtype=bool)
+
+    for idx, edge in enumerate(edges):
+        # ZZ
+        ising_z[idx, edge] = True
+        # XX
+        ff1_x[idx, edge] = True
+        # YY
+        ff2_x[idx, edge] = True
+        ff2_z[idx, edge] = True
+
+    # Two-body Hamiltonian terms
+    ising_hamiltonian = op.Operator.from_paulis_and_weights(pa.PauliArray(ising_z, ising_x), -J*delta)
+    ff1_hamiltonian = op.Operator.from_paulis_and_weights(pa.PauliArray(ff1_z, ff1_x), -J)
+    ff2_hamiltonian = op.Operator.from_paulis_and_weights(pa.PauliArray(ff2_z, ff2_x), -J)
+    H = ising_hamiltonian.__add__(ff1_hamiltonian).__add__(ff2_hamiltonian)
+
+    # Longitudinal field: -2h Σ Z_i
+    if h != 0:
+        field_z = np.zeros((n, n), dtype=bool)
+        field_x = np.zeros((n, n), dtype=bool)
+
+        for i in range(n):
+            field_z[i, i] = True
+
+        field_term = op.Operator.from_paulis_and_weights(pa.PauliArray(field_z, field_x), -2*h)
+        H = H.__add__(field_term)
+
+    return H
+
+
+
+
 def generate_dq_hamiltonian(n, neighbor_list=None):
     
     """Creates an operator object that behaves as the double quantum (DQ) hamiltonian"""
@@ -71,7 +125,7 @@ def generate_dq_hamiltonian(n, neighbor_list=None):
 
 
 
-def generate_louivillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=None, directed=True, decay_factor=1.0):
+def generate_liouvillian_graph(seed_label, ham, depth, corr_cutoff=4, max_nodes=None, directed=True, decay_factor=1.0):
     """
     Generate a rustworkx PyGraph representing successive commutators
     with `ham` starting from `seed_label` up to `depth` layers.
@@ -185,7 +239,14 @@ def node_attr(node):
     blue = max(30, base - (count - 1) * decrement)
     hex_color = f"#{0:02x}{0:02x}{blue:02x}"
     # return early so the final return isn't reached
-    return {"label": " ".join(parts), "color": "blue" if count == 1 else "red", "fillcolor": "blue" if count == 1 else "red", "style": "filled", "fontcolor": "white", "shape": "ellipse", "fontsize": "9", "width": "0.7", "height": "0.7", "fixedsize": "true"}
+    return {"label": " ".join(parts), 
+            "color": "blue" if count==1 else ('blueviolet' if count==2 else ('magenta' if count==3 else 'red')), 
+            "fillcolor": "blue" if count == 1 else ('blueviolet' if count==2 else ('magenta' if count==3 else 'red')), 
+            "style": "filled", "fontcolor": "white", "shape": "ellipse", "fontsize": "15", "width": "1.2", "height": "1.2", "fixedsize": "true"}
+    # return {"label": " ".join(parts), 
+    #         "color": "blue" if count==1 else ('blueviolet' if count==2 else ('magenta' if count==3 else 'red')), 
+    #         "fillcolor": "blue" if count == 1 else ('blueviolet' if count==2 else ('magenta' if count==3 else 'red')), 
+    #         "style": "filled", "fontcolor": "white", "shape": "ellipse", "fontsize": "9", "width": "0.7", "height": "0.7", "fixedsize": "true"}
     #return {"label": " ".join(parts) if parts else s}
     
 
@@ -264,11 +325,21 @@ def pauli_to_mqc(p_string, basis="Z"):
     mqc = {}
     match basis:
         case "Z":
+            #use pascal's triangle as a result of squared intensities
             num_x = p_string.count('X')
             num_y = p_string.count('Y')
             n = num_x + num_y
-            for nminus in range(0, 2*n+1, 2):
+            q=n
+            i=0
+            while q>=0:
+                mqc[q]= comb(n,i, exact=True)
+                mqc[-q]=mqc[q]
+                q-=2
+                i+=1
+            """ Old version:
+                for nminus in range(0, 2*n+1, 2):
                 mqc[n-nminus] = (1j)**num_y * np.sum([comb(num_x, k)*comb(num_y, nminus//2-k)*((-1)**(nminus//2 - k) ) for k in range(0, nminus//2+1)])
+            """
         case "X":
             pass  # implement later
         case "Y":
@@ -309,7 +380,7 @@ def compute_time_evolution(graph, A0, times, weight_fn=lambda x: x, max_step=0.0
 
 
 
-def plot_mqc_from_label_map(label_map, A_t, times=None):
+def plot_mqc_from_label_map(label_map, A_t, times=None, debug=False):
     """
     Generate an MQC plot from a label_map and time-evolved operator weights.
 
@@ -321,57 +392,57 @@ def plot_mqc_from_label_map(label_map, A_t, times=None):
     Returns:
     - None, displays the MQC plot
     """
-    # Compute MQC intensities
-    mqc_intensity = {}
-    if times is None:
-        times = np.arange(A_t.shape[0])
+
+    pauli = {
+        'I': [(1,'I')], 'Z': [(1,'Z')],
+        'X': [(1/np.sqrt(2),'P'), (1/np.sqrt(2),'M')],
+        'Y': [(-1j/np.sqrt(2),'P'), (1j/np.sqrt(2),'M')]
+    }
+
+    # expands input labels in XYZ basis into output labels in PMZ
+    expanded = {}
     for label, idx in label_map.items():
-        mqc_orders = pauli_to_mqc(label)
-        for order, coeff in mqc_orders.items():
-            if order not in mqc_intensity:
-                mqc_intensity[order] = np.zeros(len(times), dtype=np.complex128)
-            mqc_intensity[order] += coeff * A_t[:, idx]
+        out = []
+        for terms in product(*[pauli[c] for c in label]):
+            coef = 1
+            ops = []
+            for c, o in terms:
+                coef *= c
+                ops.append(o)
+            out.append((coef * A_t[:, idx], ''.join(ops)))
+        expanded[label] = out
+    if debug: print(expanded)
 
-    # Convert to intensity (magnitude squared)
-    mqc_intensity = {order: np.abs(intensity)**2 for order, intensity in mqc_intensity.items()}
+    # combine like terms
+    combined = defaultdict(lambda: np.zeros_like(A_t[:, 0], dtype=complex))
+    for label, terms in expanded.items():
+        for coef_vec, out_label in terms:
+            combined[out_label] += coef_vec
+    if debug: print(combined)
 
-    # Create a 3D wire plot for MQC intensities
+    # calculate mqc intensities 
+    mqc = defaultdict(lambda: np.zeros_like(A_t[:, 0], dtype=float))
+    for ops, amp_t in combined.items():
+        # test funct to see contribution from non-single-Z terms
+        # if (ops.count('P')!=0 or ops.count('M')!=0) :
+        if (True) :
+            order = ops.count('P') - ops.count('M')
+            mqc[order] += np.abs(amp_t)**2
+    if debug: print(mqc)
+
     fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(111, projection='3d')
 
-    orders = sorted(mqc_intensity.keys())
-    X, Y = np.meshgrid(times, orders)
-    Z = np.array([mqc_intensity[order] for order in orders])
+    orders = sorted(mqc.keys())
+    Z = np.vstack([mqc[o] for o in orders])
 
-    for i in range(len(orders)):
-        ax.plot(times, [orders[i]] * len(times), Z[i], label=f"Order {orders[i]}")
+    for i, o in enumerate(orders):
+        ax.plot(times, np.full_like(times, o), (Z[i]))
 
     ax.set_xlabel("Time")
     ax.set_ylabel("MQC Order")
     ax.set_zlabel("Intensity")
     ax.set_title("3D Wire Plot of MQC Intensities")
-    plt.legend(fontsize="small", bbox_to_anchor=(1.02, 1), loc="upper left")
+
     plt.tight_layout()
     plt.show()
-    
-    # Compute the second moment of the MQC intensity (OTOC)
-    otoc = np.zeros(len(times))
-    for order, intensity in mqc_intensity.items():
-        otoc += order**2 * intensity
-
-    # Plot the OTOC as a function of time
-    plt.figure(figsize=(6, 4))
-    plt.plot(times, otoc, label="OTOC", color="purple", linewidth=2)
-    plt.xlabel("Time")
-    plt.ylabel("OTOC")
-    plt.title("Out-of-Time-Ordered Correlator (OTOC) vs Time")
-    plt.legend()
-    plt.grid()
-    plt.tight_layout()
-    plt.show()
-
-
-
-# Define the Bessel function model
-def bessel_model(t, amplitude, frequency, phase):
-    return amplitude * j0(2 * np.pi * frequency * t + phase)
