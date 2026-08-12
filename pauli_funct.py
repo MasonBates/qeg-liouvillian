@@ -18,7 +18,6 @@ import timeit
 import cProfile, pstats, io
 
 
-
 # ======================================================================
 # NOTE: Generating hamiltonians using Pauliarray operator types
 
@@ -247,52 +246,45 @@ def solve_chain_time_series(chain_mat, A0, times, max_step=.01):
 # ================================================================================
 # Multiple quantum coherences
 
-def pauli_to_mqc(p_string, basis="Z"):
+def operator_to_mqc_z_basis(operator:op.Operator):
     r"""
-    Take an operator and return a dictionary of its 'Multiple Quantum Coherence' (MQC) values and coefficients. 
-    For simplicity, we limit our input operators to Pauli strings, since operators are ultimately just sums of Pauli strings
+    Take an operator and return a dictionary of its 'Multiple Quantum Coherence' (MQC) orders (q) and corresponding intensities. 
 
-    We need to define a "basis" with which we have our raising and lowering (flipping) operators. 
-    For example, if our basis is Z, then our raising operator sigma_+ = |0><1|, lowering operator sigma_- = |1><0| (raises/lowers the Z eigenvalue)
-    Or, if our basis is X, then our sigma_+ = |+><-|, sigma_- = |-><+| (raises/lowers the X eigenvalue)
-    
+    Importantly, we are working in the Z-basis (ladder operators), so our decomposing operator P = \sum_i \sigma_z^{(i)}. 
+    This is needed in order for this code to work; see OneNote for mathematical working.
+
     Returns:
-    - Dictionary of {q1: corresponding coefficient, q2: corresponding coefficient, ... etc}
+    - Dictionary of {first q: intensity, second q: intensity, ... etc}
     """
 
     mqc = {}
+    
+    # step 1: code that breaks O into Pauli strings with their corresponding weights
 
-    match basis:        # "match-case" block is an alternative to "if-elif-else"
+    # step 2: code that uses for loop to convert each Pauli string into sigma+_ basis, without shrinking the basis!! (keep 4^N L-values). 
+    # It will be slow as hell but get it working first
+    # instead of a binary (0 and 1) basis, use a quartenary basis (1234)
 
-        case "Z":           
-            num_x = p_string.count('X')
-            num_y = p_string.count('Y')
+    for pauli_string in range(xyz_pauli_strings):
+        coeff = weights[pauli_string]
+        
+        # Map symplectic (z, x) to Ladder basis expansion
+        # X -> P + M
+        # Y -> -iP + iM = -i(P - M)
 
-            for k in range(0, num_x+1):
-                for g in range(0, num_y+1):
-                    q = int(2*(k+g)-num_y-num_x)        # The MQC order q
-                    mqc[q] = mqc.get(q,0) + int((-1)**g * comb(num_x,k,exact=True) * comb(num_y,g,exact=True))*(1j)**num_y      # Sum up all the corresponding coeffs for q
-            
-            mqc = {mqc_key: mqc_value for mqc_key, mqc_value in mqc.items() if mqc_value != 0}      # Remove any values of 0; has no effect
+        # We simply have to create a dictionary of these new 
 
-        case "X":
-            pass  # implement later
 
-        case "Y":
-            pass  # implement later
+    # step 3: code that combines the vectors 
 
-        case _:
-            raise ValueError(f"Unknown basis: {basis}")
         
     return mqc
 
 
 def pauli_to_mqc_andrew(p_string, basis="Z"):
     r"""
-    Take a Pauli string and return a dictionary mapping MQC orders to their coefficients
-    in the given basis. The MQC order of an operators Oq is defined in a basis of the 
-    (collective) operator P = \sum_i \sigma_mu^{(i)} as [P, Oq ] = q Oq. When P is a 
-    Pauli-Z, the MQC order can be computed by counting the number of sigma_+ operators minus
+    Take a Pauli string and return a dictionary mapping MQC orders to their coefficients in the given basis. The MQC order of an operators Oq is defined in a basis of the
+    (collective) operator P = \sum_i \sigma_mu^{(i)} as [P, Oq ] = q Oq. When P is a Pauli-Z, the MQC order can be computed by counting the number of sigma_+ operators minus
     the number of sigma_- operators in the Pauli string.
     """
     mqc = {}
@@ -305,6 +297,10 @@ def pauli_to_mqc_andrew(p_string, basis="Z"):
 
             for nminus in range(0, 2*n+1, 2):
                 mqc[n-nminus] = (1j)**num_y * np.sum([comb(num_x, k)*comb(num_y, nminus//2-k)*((-1)**(nminus//2 - k) ) for k in range(0, nminus//2+1)])
+            
+            # # My inclusion to Andrew's code
+            # mqc = {mqc_key: mqc_value for mqc_key, mqc_value in mqc.items() if mqc_value != 0}      # Remove any values of 0; has no effect
+
         case "X":
             pass  # implement later
         case "Y":
@@ -336,7 +332,7 @@ def plot_mqc_from_label_map(label_map, A_t, times=None):
         times = np.arange(A_t.shape[0])
 
     for label, idx in label_map.items():
-        mqc_orders = pauli_to_mqc(label)
+        mqc_orders = pauli_to_mqc_andrew(label)
 
         for order, coeff in mqc_orders.items():
             if order not in mqc_intensity:
